@@ -1,0 +1,13 @@
+dwmstatus - dwm's status bar
+============================
+
+It is small program written in C, that generates dwm[1] status bar information
+about keyboard layout, alsa volume level, load of the system and time.
+
+Building
+--------
+
+To build dwmstatus simply type make. You may want change config.mk depending on
+your system.
+
+[1] http://dwm.suckless.org
