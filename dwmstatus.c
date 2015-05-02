@@ -1,4 +1,4 @@
-#define _BSD_SOURCE
+#define _DEFAULT_SOURCE
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,17 +10,26 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-#include <X11/Xlib.h>
+#include <alsa/asoundlib.h>
 
-char *tzargentina = "America/Buenos_Aires";
-char *tzutc = "UTC";
-char *tzberlin = "Europe/Berlin";
+#include <X11/Xlib.h>
+#include <X11/XKBlib.h>
 
 static Display *dpy;
+static char *kbl[] = {
+	"EN",
+	"CZ",
+};
+
+static char *smprintf(char *fmt, ...);
+static char *getvol(void);
+static unsigned int getkblayout(void);
+static char * mktimes(char *fmt);
+static char *loadavg(void);
+static void setstatus(char *str);
 
 char *
-smprintf(char *fmt, ...)
-{
+smprintf(char *fmt, ...) {
 	va_list fmtargs;
 	char *ret;
 	int len;
@@ -42,21 +51,48 @@ smprintf(char *fmt, ...)
 	return ret;
 }
 
-void
-settz(char *tzname)
-{
-	setenv("TZ", tzname, 1);
+char *
+getvol(void) {
+	long int min, max, vol;
+	int sw, perc;
+	snd_mixer_t * handle;
+	snd_mixer_elem_t * elem;
+	snd_mixer_selem_id_t * s_elem;
+
+	snd_mixer_open(&handle, 0);
+	snd_mixer_attach(handle, "default");
+	snd_mixer_selem_register(handle, NULL, NULL);
+	snd_mixer_load(handle);
+	snd_mixer_selem_id_malloc(&s_elem);
+	snd_mixer_selem_id_set_name(s_elem, "Master");
+
+	elem = snd_mixer_find_selem(handle, s_elem);
+
+	if (elem == NULL) {
+		snd_mixer_selem_id_free(s_elem);
+		snd_mixer_close(handle);
+		return smprintf("Err");
+	}
+
+	snd_mixer_handle_events(handle);
+	snd_mixer_selem_get_playback_volume_range(elem, &min, &max);
+	snd_mixer_selem_get_playback_volume(elem, 0, &vol);
+	snd_mixer_selem_get_playback_switch(elem, 0, &sw);
+
+	snd_mixer_selem_id_free(s_elem);
+	snd_mixer_close(handle);
+
+	perc = 100 * (min - vol) / (min - max);
+	return smprintf("%d%s", perc, ((sw) ? "" : "M"));
 }
 
 char *
-mktimes(char *fmt, char *tzname)
-{
+mktimes(char *fmt) {
 	char buf[129];
 	time_t tim;
 	struct tm *timtm;
 
 	memset(buf, 0, sizeof(buf));
-	settz(tzname);
 	tim = time(NULL);
 	timtm = localtime(&tim);
 	if (timtm == NULL) {
@@ -73,15 +109,13 @@ mktimes(char *fmt, char *tzname)
 }
 
 void
-setstatus(char *str)
-{
+setstatus(char *str) {
 	XStoreName(dpy, DefaultRootWindow(dpy), str);
 	XSync(dpy, False);
 }
 
 char *
-loadavg(void)
-{
+loadavg(void) {
 	double avgs[3];
 
 	if (getloadavg(avgs, 3) < 0) {
@@ -92,34 +126,37 @@ loadavg(void)
 	return smprintf("%.2f %.2f %.2f", avgs[0], avgs[1], avgs[2]);
 }
 
+unsigned int
+getkblayout(void) {
+	XkbStateRec state;
+	XkbGetState(dpy, XkbUseCoreKbd, &state);
+	return state.group;
+}
+
 int
-main(void)
-{
+main(void) {
 	char *status;
 	char *avgs;
-	char *tmar;
-	char *tmutc;
-	char *tmbln;
+	char *tmprg;
+	char *vol;
 
 	if (!(dpy = XOpenDisplay(NULL))) {
 		fprintf(stderr, "dwmstatus: cannot open display.\n");
 		return 1;
 	}
 
-	for (;;sleep(90)) {
+	for (;;sleep(2)) {
 		avgs = loadavg();
-		tmar = mktimes("%H:%M", tzargentina);
-		tmutc = mktimes("%H:%M", tzutc);
-		tmbln = mktimes("KW %W %a %d %b %H:%M %Z %Y", tzberlin);
+		tmprg = mktimes("%a %d %b %Y %H:%M");
+		vol = getvol();
 
-		status = smprintf("L:%s A:%s U:%s %s",
-				avgs, tmar, tmutc, tmbln);
+		status = smprintf("%s V:%s L:%s %s",
+				kbl[getkblayout()], vol, avgs, tmprg);
 		setstatus(status);
 		free(avgs);
-		free(tmar);
-		free(tmutc);
-		free(tmbln);
+		free(tmprg);
 		free(status);
+		free(vol);
 	}
 
 	XCloseDisplay(dpy);
