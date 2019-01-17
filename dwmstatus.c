@@ -1,4 +1,6 @@
 #define _DEFAULT_SOURCE
+#include <errno.h>
+#include <poll.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,6 +17,10 @@
 
 #include <X11/Xlib.h>
 #include <X11/XKBlib.h>
+
+#define LEN(x) (sizeof x / sizeof * x)
+
+#define POLL_TIMER  0
 
 static Display *dpy;
 static char *kbl[] = {
@@ -134,37 +140,77 @@ getkblayout(void) {
 	return state.group;
 }
 
+void
+flush_fd(const int fd) {
+	char buf[BUFSIZ];
+	ssize_t ret;
+
+	while ((ret = read(fd, buf, sizeof buf)) > 0) {
+	}
+}
+
 int
 main(void) {
+	struct itimerspec timer_value;
+	struct pollfd pfd[1];
 	int timer_fd;
 	char *status;
 	char *avgs;
 	char *tmprg;
 	char *vol;
+	int ret;
 
 	timer_fd = timerfd_create(CLOCK_REALTIME, TFD_NONBLOCK | TFD_CLOEXEC);
 	if (timer_fd == -1) {
 		perror("timerfd_create");
 		exit(1);
 	}
+	memset(&timer_value, 0, sizeof timer_value);
+	timer_value.it_interval.tv_sec = 2;
+	timer_value.it_value.tv_sec = 1;
+
+	ret = timerfd_settime(timer_fd, 0, &timer_value, NULL);
+	if (ret == -1) {
+		perror("timerfd_settime");
+		exit(1);
+	}
+
+	pfd[POLL_TIMER].fd = timer_fd;
+	pfd[POLL_TIMER].events = POLLIN;
 
 	if (!(dpy = XOpenDisplay(NULL))) {
 		fprintf(stderr, "dwmstatus: cannot open display.\n");
 		return 1;
 	}
 
-	for (;;sleep(2)) {
-		avgs = loadavg();
-		tmprg = mktimes("%a %d %b %Y %H:%M");
-		vol = getvol();
+	for (;;) {
+		ret = poll(pfd, LEN(pfd), -1);
+		switch (ret) {
+		case 0:
+			fprintf(stderr, "timeout\n");
+			break;
+		case -1:
+			if (errno == EINTR)
+				continue;
+			perror("poll");
+			break;
+		default:
+			if (pfd[POLL_TIMER].revents & POLLIN) {
+				flush_fd(timer_fd);
+			}
+			avgs = loadavg();
+			tmprg = mktimes("%a %d %b %Y %H:%M");
+			vol = getvol();
 
-		status = smprintf("%s V:%s L:%s %s",
-				kbl[getkblayout()], vol, avgs, tmprg);
-		setstatus(status);
-		free(avgs);
-		free(tmprg);
-		free(status);
-		free(vol);
+			status = smprintf("%s V:%s L:%s %s",
+					kbl[getkblayout()], vol, avgs, tmprg);
+			setstatus(status);
+			free(avgs);
+			free(tmprg);
+			free(status);
+			free(vol);
+		}
+		fprintf(stderr, "loop\n");
 	}
 
 	XCloseDisplay(dpy);
