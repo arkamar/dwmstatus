@@ -33,7 +33,6 @@ static char *kbl[] = {
 static char *smprintf(char *fmt, ...);
 static char *getvol(void);
 static unsigned int getkblayout(void);
-static char * mktimes(char *fmt);
 
 char *
 smprintf(char *fmt, ...) {
@@ -96,9 +95,10 @@ getvol(void) {
 	return buf;
 }
 
+static
 char *
-mktimes(char *fmt) {
-	char buf[129];
+mktimes(const char *fmt) {
+	static char buf[129];
 	time_t tim;
 	struct tm *timtm;
 
@@ -115,7 +115,7 @@ mktimes(char *fmt) {
 		exit(1);
 	}
 
-	return smprintf("%s", buf);
+	return buf;
 }
 
 void
@@ -148,9 +148,8 @@ main(void) {
 	int timer_fd;
 	int inotifier_fd;
 	int watch_descriptor;
-	char *status;
-	char *tmprg;
 	char *vol = getvol();
+	char *status;
 	int ret;
 
 	timer_fd = timerfd_create(CLOCK_REALTIME, TFD_NONBLOCK | TFD_CLOEXEC);
@@ -212,13 +211,11 @@ main(void) {
 				vol = getvol();
 				flush_fd(inotifier_fd);
 			}
-			tmprg = mktimes("%a %d %b %Y %H:%M");
 
 			status = smprintf("%s V:%s L:%.2f %.2f %.2f %s",
-					kbl[getkblayout()], vol, load_avgs[0], load_avgs[1], load_avgs[2], tmprg);
+					kbl[getkblayout()], vol, load_avgs[0], load_avgs[1], load_avgs[2], mktimes("%a %d %b %Y %H:%M"));
 			set_status(status);
 			fprintf(stderr, "status: %s\n", status);
-			free(tmprg);
 			free(status);
 		}
 	}
