@@ -32,7 +32,6 @@ static char *smprintf(char *fmt, ...);
 static char *getvol(void);
 static unsigned int getkblayout(void);
 static char * mktimes(char *fmt);
-static char *loadavg(void);
 static void setstatus(char *str);
 
 char *
@@ -121,18 +120,6 @@ setstatus(char *str) {
 	XSync(dpy, False);
 }
 
-char *
-loadavg(void) {
-	double avgs[3];
-
-	if (getloadavg(avgs, 3) < 0) {
-		perror("getloadavg");
-		exit(1);
-	}
-
-	return smprintf("%.2f %.2f %.2f", avgs[0], avgs[1], avgs[2]);
-}
-
 unsigned int
 getkblayout(void) {
 	XkbStateRec state;
@@ -153,9 +140,9 @@ int
 main(void) {
 	struct itimerspec timer_value;
 	struct pollfd pfd[1];
+	double load_avgs[3];
 	int timer_fd;
 	char *status;
-	char *avgs;
 	char *tmprg;
 	char *vol;
 	int ret;
@@ -197,20 +184,21 @@ main(void) {
 		default:
 			if (pfd[POLL_TIMER].revents & POLLIN) {
 				flush_fd(timer_fd);
+				if (getloadavg(load_avgs, 3) < 0) {
+					perror("getloadavg");
+				}
 			}
-			avgs = loadavg();
 			tmprg = mktimes("%a %d %b %Y %H:%M");
 			vol = getvol();
 
-			status = smprintf("%s V:%s L:%s %s",
-					kbl[getkblayout()], vol, avgs, tmprg);
+			status = smprintf("%s V:%s L:%.2f %.2f %.2f %s",
+					kbl[getkblayout()], vol, load_avgs[0], load_avgs[1], load_avgs[2], tmprg);
 			setstatus(status);
-			free(avgs);
+			fprintf(stderr, "status: %s\n", status);
 			free(tmprg);
 			free(status);
 			free(vol);
 		}
-		fprintf(stderr, "loop\n");
 	}
 
 	XCloseDisplay(dpy);
