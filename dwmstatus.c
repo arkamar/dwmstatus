@@ -34,7 +34,6 @@ static char *smprintf(char *fmt, ...);
 static char *getvol(void);
 static unsigned int getkblayout(void);
 static char * mktimes(char *fmt);
-static void setstatus(char *str);
 
 char *
 smprintf(char *fmt, ...) {
@@ -120,7 +119,7 @@ mktimes(char *fmt) {
 }
 
 void
-setstatus(char *str) {
+set_status(const char *str) {
 	XStoreName(dpy, DefaultRootWindow(dpy), str);
 	XSync(dpy, False);
 }
@@ -217,7 +216,7 @@ main(void) {
 
 			status = smprintf("%s V:%s L:%.2f %.2f %.2f %s",
 					kbl[getkblayout()], vol, load_avgs[0], load_avgs[1], load_avgs[2], tmprg);
-			setstatus(status);
+			set_status(status);
 			fprintf(stderr, "status: %s\n", status);
 			free(tmprg);
 			free(status);
