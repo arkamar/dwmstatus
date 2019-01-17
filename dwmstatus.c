@@ -1,14 +1,15 @@
 #define _DEFAULT_SOURCE
-#include <unistd.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdarg.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/time.h>
-#include <time.h>
+#include <sys/timerfd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
 
 #include <alsa/asoundlib.h>
 
@@ -135,10 +136,17 @@ getkblayout(void) {
 
 int
 main(void) {
+	int timer_fd;
 	char *status;
 	char *avgs;
 	char *tmprg;
 	char *vol;
+
+	timer_fd = timerfd_create(CLOCK_REALTIME, TFD_NONBLOCK | TFD_CLOEXEC);
+	if (timer_fd == -1) {
+		perror("timerfd_create");
+		exit(1);
+	}
 
 	if (!(dpy = XOpenDisplay(NULL))) {
 		fprintf(stderr, "dwmstatus: cannot open display.\n");
@@ -160,6 +168,7 @@ main(void) {
 	}
 
 	XCloseDisplay(dpy);
+	close(timer_fd);
 
 	return 0;
 }
