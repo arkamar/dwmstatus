@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/inotify.h>
 #include <sys/time.h>
 #include <sys/timerfd.h>
 #include <sys/types.h>
@@ -21,6 +22,7 @@
 #define LEN(x) (sizeof x / sizeof * x)
 
 #define POLL_TIMER  0
+#define POLL_INOTIFIER 1
 
 static Display *dpy;
 static char *kbl[] = {
@@ -59,6 +61,7 @@ smprintf(char *fmt, ...) {
 
 char *
 getvol(void) {
+	static char buf[32];
 	long int min, max, vol;
 	int sw, perc;
 	snd_mixer_t * handle;
@@ -77,7 +80,8 @@ getvol(void) {
 	if (elem == NULL) {
 		snd_mixer_selem_id_free(s_elem);
 		snd_mixer_close(handle);
-		return smprintf("Err");
+		sprintf(buf, "Err");
+		return buf;
 	}
 
 	snd_mixer_handle_events(handle);
@@ -89,7 +93,8 @@ getvol(void) {
 	snd_mixer_close(handle);
 
 	perc = 100 * (min - vol) / (min - max);
-	return smprintf("%d%s", perc, ((sw) ? "" : "M"));
+	sprintf(buf, "%d%s", perc, ((sw) ? "" : "M"));
+	return buf;
 }
 
 char *
@@ -139,12 +144,14 @@ flush_fd(const int fd) {
 int
 main(void) {
 	struct itimerspec timer_value;
-	struct pollfd pfd[1];
+	struct pollfd pfd[2];
 	double load_avgs[3];
 	int timer_fd;
+	int inotifier_fd;
+	int watch_descriptor;
 	char *status;
 	char *tmprg;
-	char *vol;
+	char *vol = getvol();
 	int ret;
 
 	timer_fd = timerfd_create(CLOCK_REALTIME, TFD_NONBLOCK | TFD_CLOEXEC);
@@ -153,7 +160,7 @@ main(void) {
 		exit(1);
 	}
 	memset(&timer_value, 0, sizeof timer_value);
-	timer_value.it_interval.tv_sec = 2;
+	timer_value.it_interval.tv_sec = 5;
 	timer_value.it_value.tv_sec = 1;
 
 	ret = timerfd_settime(timer_fd, 0, &timer_value, NULL);
@@ -164,6 +171,20 @@ main(void) {
 
 	pfd[POLL_TIMER].fd = timer_fd;
 	pfd[POLL_TIMER].events = POLLIN;
+
+	inotifier_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+	if (inotifier_fd == -1) {
+		perror("inotify_init1");
+		exit(1);
+	}
+	watch_descriptor = inotify_add_watch(inotifier_fd, "/dev/snd/controlC1", IN_CLOSE);
+	if (watch_descriptor == -1) {
+		perror("inotify_add_watch");
+		exit(1);
+	}
+
+	pfd[POLL_INOTIFIER].fd = inotifier_fd;
+	pfd[POLL_INOTIFIER].events = POLLIN;
 
 	if (!(dpy = XOpenDisplay(NULL))) {
 		fprintf(stderr, "dwmstatus: cannot open display.\n");
@@ -188,8 +209,11 @@ main(void) {
 					perror("getloadavg");
 				}
 			}
+			if (pfd[POLL_INOTIFIER].revents & POLLIN) {
+				vol = getvol();
+				flush_fd(inotifier_fd);
+			}
 			tmprg = mktimes("%a %d %b %Y %H:%M");
-			vol = getvol();
 
 			status = smprintf("%s V:%s L:%.2f %.2f %.2f %s",
 					kbl[getkblayout()], vol, load_avgs[0], load_avgs[1], load_avgs[2], tmprg);
@@ -197,11 +221,11 @@ main(void) {
 			fprintf(stderr, "status: %s\n", status);
 			free(tmprg);
 			free(status);
-			free(vol);
 		}
 	}
 
 	XCloseDisplay(dpy);
+	close(inotifier_fd);
 	close(timer_fd);
 
 	return 0;
